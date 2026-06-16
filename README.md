@@ -187,7 +187,7 @@ The complete n8n workflow can be imported directly into any n8n instance.
 
 ## Results
 
-![Processing Results](screenshots/results.png)
+![Processing Results](Processed_results)
 
 The workflow successfully:
 - Processes PDF invoices
