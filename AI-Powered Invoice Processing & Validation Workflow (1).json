@@ -1,0 +1,1279 @@
+{
+  "name": "AI-Powered Invoice Processing & Validation Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "=everyMinute"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "Google Drive folder ID",
+          "mode": "list",
+          "cachedResultName": "Invoices_incomming",
+          "cachedResultUrl": "Google Drive url"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "22f22542-ca1c-410c-9c49-9f082e01f5b2",
+      "name": "Google Drive Trigger1",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        -3216,
+        -1440
+      ],
+      "credentials": {}
+        
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const invoice = $json.processInvoiceModel || {};\n\n// --------------------\n// RAW\n// --------------------\nconst rawText = JSON.stringify(invoice || {});\n\n// --------------------\n// CORE FIELDS\n// --------------------\nconst invoice_number =\n  invoice.invoiceNumber ||\n  invoice.invoice_number ||\n  \"\";\n\nconst vendor_name =\n  invoice.vendorName ||\n  invoice.vendor_name ||\n  \"\";\n\nconst invoice_date =\n  invoice.invoiceDate ||\n  invoice.invoice_date ||\n  \"\";\n\nconst due_date =\n  invoice.paymentDeadline ||\n  invoice.due_date ||\n  \"\";\n\n// --------------------\n// VENDOR ADDRESS\n// --------------------\nconst vendor_address =\n  (invoice.vendorAddress || invoice.vendor_address || \"\")\n    .toString()\n    .replace(/\\n/g, \", \")\n    .trim();\n\n// --------------------\n// AMOUNTS\n// --------------------\nconst subtotal = invoice.subTotal || invoice.subtotal || 0;\nconst tax = invoice.totalTaxAmount || invoice.tax || 0;\nconst total_amount = invoice.total || invoice.totalAmount || 0;\n\n// --------------------\n// DISCOUNT\n// --------------------\nlet total_discount = 0;\n\nconst discountFields = [\n  invoice.discount,\n  invoice.totalDiscount,\n  invoice.discountAmount\n];\n\nfor (const d of discountFields) {\n  if (typeof d === \"number\") total_discount += d;\n}\n\n// fallback regex\nconst dm = rawText.match(/discount\\s*[:\\-]?\\s*([0-9.,]+)/i);\nif (!total_discount && dm) {\n  total_discount = parseFloat(dm[1].replace(/,/g, \"\"));\n}\n\n// --------------------\n// NOTES\n// --------------------\nconst notes =\n  invoice.notes ||\n  invoice.remarks ||\n  invoice.terms ||\n  (rawText.match(/(notes|remarks|terms|special notes)\\s*[:\\-]?\\s*([\\s\\S]{10,300})/i)?.[2] || \"\");\n\n// --------------------\n// CURRENCY (SAME LOGIC AS OCR)\n// --------------------\nlet currency = \"UNKNOWN\";\n\n// symbol\nif (rawText.includes(\"₹\")) currency = \"INR\";\nelse if (rawText.includes(\"$\")) currency = \"USD\";\nelse if (rawText.includes(\"€\")) currency = \"EUR\";\nelse if (rawText.includes(\"£\")) currency = \"GBP\";\n\n// country/address\nconst address = ((vendor_address || \"\") + \" \" + rawText).toUpperCase();\n\nif (currency === \"UNKNOWN\") {\n  const map = {\n    INDIA: \"INR\",\n    USA: \"USD\",\n    \"UNITED STATES\": \"USD\",\n    UK: \"GBP\",\n    \"UNITED KINGDOM\": \"GBP\",\n    CANADA: \"CAD\",\n    GERMANY: \"EUR\",\n    EUROPE: \"EUR\",\n    FRANCE: \"EUR\"\n  };\n\n  for (const key in map) {\n    if (address.includes(key)) {\n      currency = map[key];\n      break;\n    }\n  }\n}\n\nif (currency === \"UNKNOWN\") currency = \"USD\";\n\n//------------------\n// Bill in name of \n//------------------\nconst bill_to =\n  invoice.billTo ||\n  invoice.bill_to ||\n  \"\";\n\n// --------------------\n// OUTPUT (SAME SCHEMA AS OCR)\n// --------------------\nreturn [{\n  json: {\n    invoice_number,\n    vendor_name,\n    vendor_address,\n    invoice_date,\n    due_date,\n    subtotal,\n    tax,\n    total_amount,\n    total_discount,\n    notes,\n    currency,\n    bill_to,\n    source: \"pdf\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2320,
+        -1632
+      ],
+      "id": "fd5d8596-4ede-45e9-8a71-50ac776a3ee1",
+      "name": "PDF_Normalize"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mistralAi",
+      "typeVersion": 1,
+      "position": [
+        -2544,
+        -1440
+      ],
+      "id": "1139af3b-ce87-4310-a500-7ef3c486aa49",
+      "name": "Extract text",
+      "credentials": {}
+        
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ocr = $json[0] || $json;\n\nconst text = ocr.extractedText || \"\";\n\n// --------------------\n// HELPERS\n// --------------------\nconst pick = (regex) => (text.match(regex)?.[1] || \"\").trim();\n\nconst pickAll = (regex) =>\n  [...text.matchAll(regex)].map(m => m[1]?.trim()).filter(Boolean);\n\n// --------------------\n// CORE FIELDS\n// --------------------\nconst invoice_number =\n  pick(/Invoice Reference:\\s*(.*)/i) ||\n  pick(/Invoice Number:\\s*(.*)/i);\n\nconst invoice_date = pick(/Date of Issue:\\s*(.*)/i);\nconst due_date = pick(/Due By:\\s*(.*)/i);\n\n// --------------------\n// VENDOR\n// --------------------\nconst vendor_name =\n  (text.match(/^(.{3,60})\\n.*(Invoice|Bill To|Invoice To)/im)?.[1] || \"\").trim();\n\nconst vendor_address =\n  (text.match(/(Vendor|Bill From|From)\\s*[:\\-]?\\s*([\\s\\S]{20,200}?)(Invoice To|Bill To|$)/i)?.[2] || \"\")\n    .replace(/\\n/g, \", \")\n    .replace(/\\s+/g, \" \")\n    .trim();\n\nconst bill_to =\n  (text.match(/(Bill To|Invoice To|Billed To)\\s*[:\\-]?\\s*([\\s\\S]{10,200}?)(\\n\\n|Total|Invoice|$)/i)?.[2] || \"\")\n    .replace(/\\n/g, \", \")\n    .replace(/\\s+/g, \" \")\n    .trim();\n\n// --------------------\n// AMOUNTS\n// --------------------\nconst money = (text.match(/[£₹$€]\\s?[\\d,]+(?:\\.\\d{1,2})?/g) || [])\n  .map(v => parseFloat(v.replace(/[^0-9.]/g, \"\")));\n\nconst subtotal = money[0] || 0;\nconst tax = money[1] || 0;\nconst total_amount = money.length ? money[money.length - 1] : 0;\n\n// --------------------\n// DISCOUNT\n// --------------------\nconst discounts =\n  pickAll(/Discount\\s*[:\\-]?\\s*([£₹$€]?\\s?[\\d,]+(?:\\.\\d{1,2})?)/gi)\n    .map(v => parseFloat(v.replace(/[^0-9.]/g, \"\")));\n\nconst total_discount = discounts.reduce((a, b) => a + b, 0);\n\n// --------------------\n// NOTES\n// --------------------\nconst notes =\n  pick(/(Notes|Remarks|Special Notes|Terms)\\s*[:\\-]?\\s*([\\s\\S]{10,300})/i) || \"\";\n\n// --------------------\n// CURRENCY DETECTION (SYMBOL + COUNTRY + ADDRESS)\n// --------------------\nlet currency = \"UNKNOWN\";\n\n// 1. SYMBOL (HIGHEST PRIORITY)\nif (text.includes(\"₹\")) currency = \"INR\";\nelse if (text.includes(\"$\")) currency = \"USD\";\nelse if (text.includes(\"€\")) currency = \"EUR\";\nelse if (text.includes(\"£\")) currency = \"GBP\";\n\n// 2. COUNTRY / ADDRESS KEYWORDS\nconst address = (vendor_address + \" \" + text).toUpperCase();\n\nif (currency === \"UNKNOWN\") {\n  const map = {\n    INDIA: \"INR\",\n    \"UNITED STATES\": \"USD\",\n    USA: \"USD\",\n    \"U.S.A\": \"USD\",\n    UK: \"GBP\",\n    \"UNITED KINGDOM\": \"GBP\",\n    CANADA: \"CAD\",\n    GERMANY: \"EUR\",\n    FRANCE: \"EUR\",\n    EUROPE: \"EUR\"\n  };\n\n  for (const key in map) {\n    if (address.includes(key)) {\n      currency = map[key];\n      break;\n    }\n  }\n}\n\n// fallback\nif (currency === \"UNKNOWN\") currency = \"USD\";\n\n// --------------------\n// OUTPUT\n// --------------------\nreturn [{\n  json: {\n    invoice_number,\n    vendor_name,\n    vendor_address,\n    bill_to,\n    invoice_date,\n    due_date,\n    subtotal,\n    tax,\n    total_amount,\n    total_discount,\n    notes,\n    currency,\n    source: \"ocr\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2320,
+        -1440
+      ],
+      "id": "5c8f8664-0030-4772-96fb-7fda99eb1092",
+      "name": "OCR normalize"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    ...$json,\n    status: \"Duplicate\",\n    duplicate_reason: \"Invoice Number + Vendor + Amount Match\",\n    detected_timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        -1632
+      ],
+      "id": "c7fd686c-6a41-4270-8454-435ba6838fdd",
+      "name": "Duplicate metadata"
+    },
+    {
+      "parameters": {
+        "jsCode": "const invoice = $('Pdf_Validation').item.json;\n\n// normalize helper\nconst norm = (v) =>\n  (v ?? \"\")\n    .toString()\n    .replace(/,/g, \"\")\n    .trim()\n    .toLowerCase();\n\n// safe number\nconst num = (v) => Number(String(v).replace(/,/g, \"\")) || 0;\n\n// get rows safely\nconst rows = $input.all().map(i => i.json || {});\n\n// DEBUG (optional but useful)\n// console.log(rows);\n\nconst duplicate = rows.some(r =>\n  norm(r.vendor_name) === norm(invoice.vendor_name) &&\n  num(r.total_amount) === num(invoice.total_amount)\n);\n\nreturn [{\n  json: {\n    ...invoice,\n    isDuplicate: duplicate\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1648,
+        -1632
+      ],
+      "id": "b1f01bc7-07cd-4ea5-9f32-b04cd0ea1dfd",
+      "name": "Duplicate detection"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    file_name: $json.name || \"\",\n    file_id: $json.id || \"\",\n    mime_type: $json.mimeType || \"\",\n    status: \"Rejected\",\n    rejection_reason: \"Unsupported file type\",\n    detected_timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2544,
+        -1248
+      ],
+      "id": "12f6184f-a272-4f72-ae77-41496f7a4fef",
+      "name": "Rejection Metadata"
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Invoice_router').item.json.id }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "Folder ID ",
+          "mode": "list"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -752,
+        -1632
+      ],
+      "id": "a0fcca50-15db-4175-833c-46ec81bcd7c4",
+      "name": "MOve to Invoices_duplicate",
+      "credentials": {}
+        
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "Google sheet ID",
+          "mode": "list",
+          "cachedResultName": "Invoice_Repository",
+          "cachedResultUrl": "Google sheet url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 627907409,
+          "mode": "list",
+          "cachedResultName": "Duplicate_invoice",
+          "cachedResultUrl": "Google sheet url for duplicate tab"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "invoice_date": "={{ $json.invoice.invoice_date }}",
+            "mimeType": "={{ $('Google Drive Trigger1').item.json.mimeType }}",
+            "Invoice_Name": "={{ $('Google Drive Trigger1').item.json.originalFilename }}",
+            "Invoice id": "={{ $('Google Drive Trigger1').item.json.id }}",
+            "Invoice_number": "={{ $json.invoice.invoice_number }}",
+            "Vendor_name": "={{ $json.invoice.vendor_name }}",
+            "Vendor_address": "={{ $json.invoice.vendor_address }}",
+            "Due_date": "={{ $json.invoice.due_date }}",
+            "Subtotal": "={{ $json.invoice.subtotal }}",
+            "Tax": "={{ $json.invoice.tax }}",
+            "Total_amount": "={{ $json.invoice.total_amount }}",
+            "Total_discount": "={{ $json.invoice.total_discount }}",
+            "Currency": "={{ $json.invoice.currency }}",
+            "Notes": "={{ $json.invoice.notes }}",
+            "Bill_to": "={{ $json.invoice.bill_to }}",
+            "Source": "={{ $json.invoice.source }}",
+            "Processing_Status": "={{ $json.status }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Invoice_Name",
+              "displayName": "Invoice_Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "mimeType",
+              "displayName": "mimeType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Invoice id",
+              "displayName": "Invoice id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Invoice_number",
+              "displayName": "Invoice_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Vendor_name",
+              "displayName": "Vendor_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Vendor_address",
+              "displayName": "Vendor_address",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "invoice_date",
+              "displayName": "invoice_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Due_date",
+              "displayName": "Due_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Subtotal",
+              "displayName": "Subtotal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Tax",
+              "displayName": "Tax",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Total_amount",
+              "displayName": "Total_amount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Total_discount",
+              "displayName": "Total_discount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Currency",
+              "displayName": "Currency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Notes",
+              "displayName": "Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Bill_to",
+              "displayName": "Bill_to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Source",
+              "displayName": "Source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Processing_Status",
+              "displayName": "Processing_Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -976,
+        -1632
+      ],
+      "id": "a8c4472e-9998-4c75-93fa-fb67a80db2d8",
+      "name": "Append row in Duplicate_invoice",
+      "credentials": {}
+        
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "Google sheet ID",
+          "mode": "list",
+          "cachedResultName": "Invoice_Repository",
+          "cachedResultUrl": "Google sheet url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Processed_invoice",
+          "cachedResultUrl": "Google sheet url for processed tab"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "invoice_date": "={{ $json.invoice.invoice_date }}",
+            "Invoice_number": "={{ $json.invoice_number }}",
+            "Vendor_name": "={{ $json.invoice.vendor_name }}",
+            "Vendor_address": "={{ $json.invoice.vendor_address }}",
+            "Due_date": "={{ $json.invoice.due_date }}",
+            "Subtotal": "={{ $json.invoice.subtotal }}",
+            "Tax": "={{ $json.invoice.tax }}",
+            "Total_amount": "={{ $json.invoice.total_amount }}",
+            "Total_discount": "={{ $json.invoice.total_discount }}",
+            "Currency": "={{ $json.invoice.currency }}",
+            "Notes": "={{ $json.invoice.notes }}",
+            "Bill_to": "={{ $json.invoice.bill_to }}",
+            "Source": "={{ $json.invoice.source }}",
+            "Processing_Status": "={{ $json.status }}",
+            "Invoice_Name": "={{ $('Google Drive Trigger1').item.json.originalFilename }}",
+            "mimeType": "={{ $('Google Drive Trigger1').item.json.mimeType }}",
+            "Invoice id": "={{ $('Google Drive Trigger1').item.json.id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Invoice_Name",
+              "displayName": "Invoice_Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "mimeType",
+              "displayName": "mimeType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Invoice id",
+              "displayName": "Invoice id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Invoice_number",
+              "displayName": "Invoice_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Vendor_name",
+              "displayName": "Vendor_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Vendor_address",
+              "displayName": "Vendor_address",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "invoice_date",
+              "displayName": "invoice_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Due_date",
+              "displayName": "Due_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Subtotal",
+              "displayName": "Subtotal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Tax",
+              "displayName": "Tax",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Total_amount",
+              "displayName": "Total_amount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Total_discount",
+              "displayName": "Total_discount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Currency",
+              "displayName": "Currency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Notes",
+              "displayName": "Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Bill_to",
+              "displayName": "Bill_to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Source",
+              "displayName": "Source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Processing_Status",
+              "displayName": "Processing_Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1200,
+        -1440
+      ],
+      "id": "fc519e15-d44d-4519-8d62-b484e592688c",
+      "name": "Append row in Processed_invoice",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GegncX3yJzLQDWfC",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "Google sheet ID",
+          "mode": "list",
+          "cachedResultName": "Invoice_Repository",
+          "cachedResultUrl": "Google sheet url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 879214955,
+          "mode": "list",
+          "cachedResultName": "Rejected_invoice",
+          "cachedResultUrl": "Google sheet url for rejected tab"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "detected_timestamp": "={{ $json.detected_timestamp }}",
+            "file_name": "={{ $json.file_name }}",
+            "file_id": "={{ $json.file_id }}",
+            "mime_type": "={{ $json.mime_type }}",
+            "status": "={{ $json.status }}",
+            "rejection_reason": "={{ $json.rejection_reason }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "file_name",
+              "displayName": "file_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "file_id",
+              "displayName": "file_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "mime_type",
+              "displayName": "mime_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "rejection_reason",
+              "displayName": "rejection_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "detected_timestamp",
+              "displayName": "detected_timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -2320,
+        -1248
+      ],
+      "id": "72f3808c-7a89-4ec2-a219-f951302b414a",
+      "name": "Append row in Rejected_invoice",
+      "credentials": {}
+        
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const invoice = $('OCR_Validation').item.json; // or merged invoice object\n\nconst rows = $input.all().map(i => i.json);\n\nconst duplicate = rows.some(r =>\n  r.vendor_name === invoice.vendor_name &&\n  Number(r.total_amount) === Number(invoice.total_amount)\n);\n\nreturn [{\n  json: {\n    ...invoice,\n    isDuplicate: duplicate\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1648,
+        -1440
+      ],
+      "id": "b2e1ab3c-63a7-410d-b0b3-10b57020c5e1",
+      "name": "Duplicate detection1"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "Google sheet ID",
+          "mode": "list",
+          "cachedResultName": "Invoice_Repository",
+          "cachedResultUrl": "Google sheet url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Processed_invoice",
+          "cachedResultUrl": "Google sheet url for processed tab"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Invoice_number",
+              "lookupValue": "={{ $json.invoice_number }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1872,
+        -1440
+      ],
+      "id": "c656b67f-5169-4c69-bcff-8bfbdc8d799d",
+      "name": "OCR_duplicate search",
+      "alwaysOutputData": true,
+      "credentials": {}
+        
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "Google sheet ID",
+          "mode": "list",
+          "cachedResultName": "Invoice_Repository",
+          "cachedResultUrl": "Google sheet url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Processed_invoice",
+          "cachedResultUrl": "Google sheet url for processed tab"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Invoice_number",
+              "lookupValue": "={{ $json.invoice.invoice_number }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": false
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1872,
+        -1632
+      ],
+      "id": "2a5fcd00-fc2f-4b78-813a-25a7dc557b55",
+      "name": "PDF_duplicate search",
+      "alwaysOutputData": true,
+      "credentials": {}
+       
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-pdf4me.PDF4me",
+      "typeVersion": 1,
+      "position": [
+        -2544,
+        -1632
+      ],
+      "id": "05b0b1e7-eec2-4e4b-bbc8-a12d226f9954",
+      "name": "AI-Invoice Parser",
+      "credentials": {}
+        
+      }
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Invoice_router').item.json.id }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "Google Drive folder ID",
+          "mode": "list"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -976,
+        -1440
+      ],
+      "id": "a6b23549-6ce3-4fdd-8343-e237bc23ba63",
+      "name": "Move to Invoices_processed",
+      "credentials": {}
+        
+      }
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.mimeType }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "application/pdf"
+            },
+            {
+              "operation": "startsWith",
+              "value2": "image/",
+              "output": 1
+            }
+          ]
+        },
+        "fallbackOutput": 2
+      },
+      "id": "77f503c8-e8b7-4922-8e3f-1a8e7380c0db",
+      "name": "Invoice_router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        -2768,
+        -1472
+      ],
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.isDuplicate}}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "0e897820-8cfc-45da-b5c3-b0d0e6cbf6f4"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "stop "
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "e093b4c4-ae30-4a33-8643-c858978dffd8",
+                    "leftValue": "={{$json.isDuplicate}}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "false",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "append sheet"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -1424,
+        -1536
+      ],
+      "id": "972a9e7c-86ec-41bb-a3fa-5c17b26cdf04",
+      "name": "Duplicate_invove _routing"
+    },
+    {
+      "parameters": {
+        "jsCode": "const invoice = $json;\n\nlet status = \"Valid\";\nlet validation_reason = \"\";\n\nif (!invoice.invoice_number) {\n  status = \"Require_Verification\";\n  validation_reason = \"Missing invoice number\";\n}\n\nif (!invoice.vendor_name) {\n  status = \"Require_Verification\";\n  validation_reason = \"Missing vendor\";\n}\n\nif (!invoice.total_amount || Number(invoice.total_amount) <= 0) {\n  status = \"Require_Verification\";\n  validation_reason = \"Invalid total amount\";\n}\n\nreturn [{\n  json: {\n    invoice,\n    status,\n    validation_reason\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2096,
+        -1632
+      ],
+      "id": "ab626d02-c332-4a6a-90a8-0954e8d60b0b",
+      "name": "Pdf_Validation"
+    },
+    {
+      "parameters": {
+        "jsCode": "const invoice = $json;\n\nlet status = \"Valid\";\nlet validation_reason = \"\";\n\nif (!invoice.invoice_number) {\n  status = \"Require_Verification\";\n  validation_reason = \"Missing invoice number\";\n}\n\nif (!invoice.vendor_name) {\n  status = \"Require_Verification\";\n  validation_reason = \"Missing vendor\";\n}\n\nif (!invoice.total_amount || Number(invoice.total_amount) <= 0) {\n  status = \"Require_Verification\";\n  validation_reason = \"Invalid total amount\";\n}\n\nreturn [{\n  json: {\n    ...invoice,\n    status,\n    validation_reason\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2096,
+        -1440
+      ],
+      "id": "0172e570-b7bc-4e85-9d49-727f1a9cb697",
+      "name": "OCR_Validation"
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Invoice_router').item.json.id }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "Google folder ID",
+          "mode": "list",
+          "cachedResultName": "Invoices_rejected",
+          "cachedResultUrl": "Googles folder url for rejected invoice"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -2096,
+        -1248
+      ],
+      "id": "13dc8b4c-7e54-4c08-b7e5-d2ae8cab98a2",
+      "name": "Move to Invoices_rejected",
+      "credentials": {}
+        
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "8ca1c54e-6a54-4189-8d8a-558931d5128a",
+      "name": "Download Invoice",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 1,
+      "position": [
+        -2992,
+        -1440
+      ],
+      "credentials": {}
+       
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Drive Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Download Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF_Normalize": {
+      "main": [
+        [
+          {
+            "node": "Pdf_Validation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract text": {
+      "main": [
+        [
+          {
+            "node": "OCR normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OCR normalize": {
+      "main": [
+        [
+          {
+            "node": "OCR_Validation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate metadata": {
+      "main": [
+        [
+          {
+            "node": "Append row in Duplicate_invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate detection": {
+      "main": [
+        [
+          {
+            "node": "Duplicate_invove _routing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rejection Metadata": {
+      "main": [
+        [
+          {
+            "node": "Append row in Rejected_invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in Duplicate_invoice": {
+      "main": [
+        [
+          {
+            "node": "MOve to Invoices_duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in Processed_invoice": {
+      "main": [
+        [
+          {
+            "node": "Move to Invoices_processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in Rejected_invoice": {
+      "main": [
+        [
+          {
+            "node": "Move to Invoices_rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate detection1": {
+      "main": [
+        [
+          {
+            "node": "Duplicate_invove _routing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OCR_duplicate search": {
+      "main": [
+        [
+          {
+            "node": "Duplicate detection1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF_duplicate search": {
+      "main": [
+        [
+          {
+            "node": "Duplicate detection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-Invoice Parser": {
+      "main": [
+        [
+          {
+            "node": "PDF_Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invoice_router": {
+      "main": [
+        [
+          {
+            "node": "AI-Invoice Parser",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rejection Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate_invove _routing": {
+      "main": [
+        [
+          {
+            "node": "Duplicate metadata",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Append row in Processed_invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pdf_Validation": {
+      "main": [
+        [
+          {
+            "node": "PDF_duplicate search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OCR_Validation": {
+      "main": [
+        [
+          {
+            "node": "OCR_duplicate search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Invoice": {
+      "main": [
+        [
+          {
+            "node": "Invoice_router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "6dbdb3c9-3e5a-4a2e-bbf0-2d7274381453",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "17e44dea9a5fab2e6a2a4a2d875158f78bd47bd30f610a62a67d5d32773944e2"
+  },
+  "nodeGroups": [],
+  "id": "posJkF0foGEPKjaA",
+  "tags": []
+}
