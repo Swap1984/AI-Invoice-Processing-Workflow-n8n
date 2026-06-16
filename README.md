@@ -136,14 +136,14 @@ Folder           Folder
 ## Repository Structure
 
 ```text
-intelligent-ap-automation-n8n/
+Ai-Invoice-Processing-Workflow-n8n/
 │
 ├── README.md
 ├── LICENSE
 ├── .gitignore
 │
 ├── workflows/
-│   └── invoice_processing_workflow.json
+│   └── ai-powered-invoice-processing-validation-workflow.json
 │
 └── screenshots/
     ├── workflow-overview.png
