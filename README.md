@@ -133,6 +133,76 @@ Folder           Folder
 * OCR Services
 * JavaScript Code Nodes
 
+## Repository Structure
+
+```text
+intelligent-ap-automation-n8n/
+│
+├── README.md
+├── LICENSE
+├── .gitignore
+│
+├── workflows/
+│   └── invoice_processing_workflow.json
+│
+└── screenshots/
+    ├── workflow-overview.png
+    ├── execution-success.png
+    ├── results.png
+    └── architecture-diagram.png
+```
+
+## Workflow File
+
+The complete n8n workflow can be imported directly into any n8n instance.
+
+**Workflow JSON:**
+
+- [AI-Powered Invoice Processing & Validation Workflow](workflows/ai-powered-invoice-processing-validation-workflow.json)
+
+### Import Instructions
+
+1. Download the workflow JSON file.
+2. Open n8n.
+3. Click **Import from File**.
+4. Select the downloaded workflow.
+5. Reconfigure credentials for:
+   - Google Drive
+   - Google Sheets
+   - PDF Parser
+   - OCR Service
+6. Update folder IDs and spreadsheet IDs as required.
+7. Execute the workflow.
+
+
+## Screenshots
+
+### Workflow Overview
+
+![Workflow Overview](screenshots/workflow-overview.png)
+
+### Architecture Diagram
+
+![Architecture Diagram](screenshots/architecture-diagram.png)
+
+## Results
+
+![Processing Results](screenshots/results.png)
+
+The workflow successfully:
+- Processes PDF invoices
+- Processes image invoices through OCR
+- Detects duplicate invoices
+- Rejects unsupported file formats
+- Logs all outcomes to Google Sheets
+- Moves files to Processed, Duplicate, and Rejected folders automatically
+
+## Successful Workflow Execution
+
+![Execution Success](screenshots/execution-success.png)
+
+The workflow successfully processed invoices through the PDF/OCR pipelines, performed validation and duplicate detection, logged results to Google Sheets, and automatically moved files to the appropriate Google Drive folders.
+
 ## Future Enhancements
 
 * Database integration
