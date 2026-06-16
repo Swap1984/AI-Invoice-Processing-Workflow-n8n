@@ -55,65 +55,79 @@ This project is an end-to-end invoice processing automation built with n8n. The 
 
 ```text
 Google Drive Trigger
-          │
-          ▼
-      Download File
-          │
-          ▼
-       Switch Node
-     (File Type)
+        │
+        ▼
+   Download File
+        │
+        ▼
+    Switch Node
+   (File Type)
 
- ┌────────┼─────────┐
- │        │         │
+ ┌──────┼───────┐
+ │      │       │
 
- ▼        ▼         ▼
+ ▼      ▼       ▼
 
-PDF     Image   Unsupported
-Path    Path    File Type
+PDF   Image  Unsupported
+Path  Path   File
 
- │        │         │
- ▼        ▼         ▼
+ │      │       │
+ ▼      ▼       ▼
 
-PDF      OCR    Rejected
-Parser  Parser   Invoice
- │        │         │
- ▼        ▼         ▼
-
-Normalize Normalize Log Rejection
- │        │         │
- ▼        ▼         ▼
-
-Quality  Quality  Move to
-Check    Check    Rejected Folder
- │        │
- ▼        ▼
-
+PDF    OCR   Log Rejection
+Parser Parser      │
+ │      │         ▼
+ ▼      ▼   Move to Rejected
+Normalize Normalize   Folder
+ │      │
+ ▼      ▼
+Quality Check
+ │
+ ▼
+Duplicate Search
+ │
+ ▼
 Duplicate Detection
  │
  ▼
-
 Switch Node
-(Duplicate Status)
+(Duplicate?)
 
- ┌──────────┴──────────┐
- ▼                     ▼
+ ┌───────────┴───────────┐
+ ▼                       ▼
 
-Duplicate         Valid Invoice
-Invoice           Invoice
+Duplicate            Valid Invoice
+Invoice              Invoice
 
- ▼                     ▼
+ ▼                       ▼
 
-Log Duplicate    Log Invoice
-Move to          Move to
-Duplicate        Processed
-Folder           Folder
+Append Row         Append Row
+Duplicate Tab      Processed Tab
+Google Sheet       Google Sheet
 
-        ▼
- Google Sheets
+ ▼                       ▼
+
+Move to            Move to
+Duplicate Folder   Processed Folder
 ```
 
 ---
+## Processing Flow
 
+1. Monitor incoming invoices in Google Drive.
+2. Route files based on MIME type.
+3. Extract invoice data using:
+   - PDF4me AI Parser (PDF invoices)
+   - Mistral OCR (Images)
+4. Normalize extracted fields into a common schema.
+5. Validate mandatory invoice information.
+6. Detect duplicate invoices using invoice number, vendor and amount.
+7. Store results in Google Sheets repository.
+8. Automatically move invoices to:
+   - Processed
+   - Duplicate
+   - Rejected folders
+  
 ## Business Outcomes
 
 * Automated invoice intake and processing
@@ -160,6 +174,33 @@ The complete n8n workflow can be imported directly into any n8n instance.
 
 - [AI-Powered Invoice Processing & Validation Workflow](workflows/ai-powered-invoice-processing-validation-workflow.json)
 
+## Configuration Required
+
+All credentials, folder IDs, spreadsheet IDs, API keys, and account-specific identifiers have been removed from this repository before publication. Before running this workflow:
+
+1. Create Google Drive folders:
+
+   * Incoming Invoices
+   * Processed Invoices
+   * Duplicate Invoices
+   * Rejected Invoices
+
+2. Create a Google Sheet with:
+
+   * Processed_invoice
+   * Duplicate_invoice
+   * Rejected_invoice
+
+3. Configure credentials:
+
+   * Google Drive OAuth2
+   * Google Sheets OAuth2
+   * PDF4ME API
+   * Mistral AI API
+
+4. Replace all placeholder IDs with your own resources.
+
+
 ### Import Instructions
 
 1. Download the workflow JSON file.
@@ -180,10 +221,6 @@ The complete n8n workflow can be imported directly into any n8n instance.
 ### Workflow Overview
 
 ![Workflow Overview](screenshots/workflow-overview.png)
-
-### Architecture Diagram
-
-![Architecture Diagram](screenshots/architecture-diagram.png)
 
 ## Results
 
@@ -211,3 +248,4 @@ The workflow successfully processed invoices through the PDF/OCR pipelines, perf
 * ERP integration
 * Analytics dashboard
 * AI-powered extraction improvements
+* Human-in-the-loop verification queue for invalid invoices
