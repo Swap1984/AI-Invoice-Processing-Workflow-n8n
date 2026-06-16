@@ -249,3 +249,19 @@ The workflow successfully processed invoices through the PDF/OCR pipelines, perf
 * Analytics dashboard
 * AI-powered extraction improvements
 * Human-in-the-loop verification queue for invalid invoices
+
+## Author
+
+**Swapnil Sudhakar Patil**
+
+- Electronics Engineer transitioning into Data Analytics, AI, and Workflow Automation.
+- Experience in Power Electronics, High Voltage Systems, Data Analytics, and Generative AI Solutions
+### Connect with Me
+
+- LinkedIn: www.linkedin.com/in/swapnil-patil-data-scientist
+
+
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
